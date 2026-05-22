@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -19,3 +22,35 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+
+      - name: Publish dist branch
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          rm -rf /tmp/simple-auth-dist
+          mkdir -p /tmp/simple-auth-dist
+
+          cp README.md schema.sql /tmp/simple-auth-dist/
+          cp -R dist /tmp/simple-auth-dist/dist
+
+          node <<'NODE'
+          const { readFileSync, writeFileSync } = require('node:fs');
+          const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+          delete pkg.scripts;
+          delete pkg.devDependencies;
+          delete pkg.packageManager;
+          writeFileSync('/tmp/simple-auth-dist/package.json', JSON.stringify(pkg, null, 2) + '\n');
+          NODE
+
+          cd /tmp/simple-auth-dist
+          git init
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -m "Build dist from ${GITHUB_SHA}"
+          git branch -M dist
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push --force origin dist
